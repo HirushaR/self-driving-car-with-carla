@@ -15,6 +15,7 @@ from keras.models import Model
 import keras.backend.tensorflow_backend as backend
 from threading import Thread
 from tqdm import tqdm
+from keras.callbacks import TensorBoard
 
 try:
     sys.path.append(glob.glob('../carla/dist/carla-*%d.%d-%s.egg' % (
@@ -50,6 +51,36 @@ MIN_EPSILON = 0.001
 
 AGGREGATE_STATS_EVERY = 10
 
+class ModifiedTensorBoard(TensorBoard):
+
+    # Overriding init to set initial step and writer (we want one log file for all .fit() calls)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.step = 1
+        self.writer = tf.summary.FileWriter(self.log_dir)
+
+    # Overriding this method to stop creating default log writer
+    def set_model(self, model):
+        pass
+
+    # Overrided, saves logs with our step number
+    # (otherwise every .fit() will start writing from 0th step)
+    def on_epoch_end(self, epoch, logs=None):
+        self.update_stats(**logs)
+
+    # Overrided
+    # We train for one batch only, no need to save anything at epoch end
+    def on_batch_end(self, batch, logs=None):
+        pass
+
+    # Overrided, so won't close writer
+    def on_train_end(self, _):
+        pass
+
+    # Custom method for saving own metrics
+    # Creates writer, writes custom metrics and closes writer
+    def update_stats(self, **stats):
+        self._write_logs(stats, self.step)
 
 class carEnv:
     SHOW_CAM = SHOW_PREVIEW
@@ -64,7 +95,7 @@ class carEnv:
         self.world = self.client.get_world()
         #self.blueprint_library = self.world.get_blueprint_library()
         blueprint_library = self.world.get_blueprint_library()
-        self.model_3 = blueprint_library.filter("model3")[0]
+        self.model_3 = self.blueprint_library.filter("model3")[0]
 
 
         def reset(self):
@@ -261,7 +292,7 @@ if __name__ == "__main__":
     while not agent.traning_initialized:
         time.sleep(0.01)
 
-    agent.get_qs(np.ones((env.IM_HEIGHT, env.IM_WIDTH,3)))
+    agent.get_qs(np.ones((env.im_height, env.im_width,3)))
 
     for episode in  tqdm(range(1, EPISODES+1), ascii=True, unit="episodes"):
         env.collision_list = []
@@ -281,10 +312,33 @@ if __name__ == "__main__":
             new_state,reward, done, _ = env.step(action)
             episode_reward += reward
             agent.update_replay_memory((current_state, action, reward, new_state, done))
-            step +=1
+            step += 1
 
+            if done:
+                break
+        for actor in env.actor_list:
+            actor.destroy()
 
+        # Append episode reward to a list and log stats (every given number of episodes)
+        ep_rewards.append(episode_reward)
+        if not episode % AGGREGATE_STATS_EVERY or episode == 1:
+            average_reward = sum(ep_rewards[-AGGREGATE_STATS_EVERY:]) / len(ep_rewards[-AGGREGATE_STATS_EVERY:])
+            min_reward = min(ep_rewards[-AGGREGATE_STATS_EVERY:])
+            max_reward = max(ep_rewards[-AGGREGATE_STATS_EVERY:])
+            agent.tensorboard.update_stats(reward_avg=average_reward , reward_min=min_reward , reward_max=max_reward ,
+                                           epsilon=epsilon)
 
+            # Save model, but only when min reward is greater or equal a set value
+            if min_reward >= MIN_REWARD:
+                agent.model.save(f'models/{MODEL_NAME}__{max_reward:_>7.2f}max_{average_reward:_>7.2f}avg_{min_reward:_>7.2f}min__{int(time.time())}.model')
+
+        if epsilon > MIN_EPSILON:
+            epsilon *= EPSILON_DECAY
+            epsilon = max(MIN_EPSILON , epsilon)
+
+    agent.terminate = True
+    trainer_thread.join()
+    agent.model.save(f'models/{MODEL_NAME}__{max_reward:_>7.2f}max_{average_reward:_>7.2f}avg_{min_reward:_>7.2f}min__{int(time.time())}.model')
 
 
 
