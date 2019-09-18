@@ -5,6 +5,7 @@ import random
 import time
 import numpy as np
 import cv2
+import math
 
 
 try:
@@ -20,6 +21,7 @@ import carla
 SHOW_PREVIEW = False
 IM_WIDTH = 640
 IM_HEIGHT = 480
+SECOND_PER_EPISODE =10
 
 class carEnv:
     SHOW_CAM = SHOW_PREVIEW
@@ -79,15 +81,40 @@ class carEnv:
             i = np.array(image.raw_data)
             # print(dir(image))
             # print(i.shape)
-            i2 = i.reshape((IM_HEIGHT , IM_WIDTH , 4))
-            i3 = i2[: , : , :3]  # entier height and width, rgb value
-            
-            cv2.imshow("" , i3)
-            cv2.waitKey(1)
-            return i3 / 255.0
+            i2 = i.reshape((self.im_height , self.im_width , 4))
+            i3 = i2[:, :, :3]  # entier height and width, rgb value
+            if self.SHOW_CAM:
+                cv2.imshow("", i3)
+                cv2.waitKey(1)
+            self.front_camera = i3
 
+        def step(self, action):
+            if action == 0:
+                self.vehicle.apply_control(carla.VehicleControl(throttle=1.0, steer=-1*self.STEER_AMT))
+            elif action == 1:
+                self.vehicle.apply_control(carla.VehicleControl(throttle=1.0, steer=0))
+            elif action == 2:
+                self.vehicle.apply_control(carla.VehicleControl(throttle=1.0, steer=1 * self.STEER_AMT))
 
+            v = self.vehicle.get_velocity()
+            kmh = int(3.6 * math.sqrt(v.x**2 + v.y**2 + v.z**2))
 
+            if len(self.collision_list) != 0:
+                done = True
+                reward = -200
+
+            elif kmh < 50:
+                done = False
+                reward = -1
+
+            else:
+                done = False
+                reward = 1
+
+            if self.episode_start + SECOND_PER_EPISODE < time.time():
+                done = True
+
+            return self.front_camera, reward, done, None
 
 
 
