@@ -6,6 +6,9 @@ import time
 import numpy as np
 import cv2
 import math
+from collections import deque
+import tensorflow as tf
+from keras.applications.xception import Xception
 
 
 try:
@@ -22,6 +25,26 @@ SHOW_PREVIEW = False
 IM_WIDTH = 640
 IM_HEIGHT = 480
 SECOND_PER_EPISODE =10
+REPLAY_MEMORY_SIZE = 5_000 #5,000
+MIN_REPLAY_MEMORY_SIZE = 1_000
+MINIBATCH_SIZE = 16
+PREDICTION_BATCH_SIZE = 1
+TRAINING_BATCH_SIZE = MINIBATCH_SIZE // 4
+UPDATE_TARGET_EVERY = 5
+MODEL_NAME = "Xception"
+
+MEMORY_FRACTION = 0.8
+MIN_REWARD = -200
+
+EPISODES =100
+
+DISCOUNT = 0.99
+epsilon = 1
+EPSILON_DECAY = 0.95
+MIN_EPSILON = 0.001
+
+AGGREGATE_STATS_EVERY = 10
+
 
 class carEnv:
     SHOW_CAM = SHOW_PREVIEW
@@ -115,6 +138,27 @@ class carEnv:
                 done = True
 
             return self.front_camera, reward, done, None
+
+class DQNAgent:
+    def __init__(self):
+        self.model = self.create_model()
+        self.target_model = self.create_model()
+        self.target_model.set_weights(self.model.get_weight())
+
+        self.replay_memory = deque(maxlen=REPLAY_MEMORY_SIZE)
+
+        self.tensorboard = ModifiedTensorBoard(log_dir=f"logs/{MODEL_NAME}-{int(time.time())}")
+        self.target_update_counter = 0
+        self.graph = tf.get_default_graph()
+
+        self.terminate = False
+        self.last_logged_episode =0
+
+        self.traning_initialized = False
+
+    def create_model(self):
+        base_model = Xception(weights=None , include_top=False , input_shape=(IM_HEIGHT, IM_WIDTH,3))
+
 
 
 
